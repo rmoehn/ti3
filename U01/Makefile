@@ -1,10 +1,11 @@
 CFLAGS = -Wall
 
 mult-test: mult-test.c
-	$(CC) $(CFLAGS) mult-test.c
+	$(CC) $(CFLAGS) -o mult-test mult-test.c
 
-test: mult-test tester example-files.txt
-	./tester
+test: mult-test tester example-correct1.dat example-incorrect1.dat
+	echo 'correct? '   && ./mult-test example-correct1.dat
+	echo 'incorrect? ' && ./mult-test example-incorrect1.dat
 	
 .PHONY: clean
 clean:

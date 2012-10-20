@@ -2,6 +2,8 @@
 
 #define MAXLINE 50
 
+char *nextline(char *, FILE *);
+
 /*
  * Usage:
  *     $ mult-test <filename>
@@ -44,23 +46,23 @@ int main(int argc, char *argv[])
     }
 
     // Try and read the first line
-    char *sum_string;
-    if (getline(sum_string, fp) == NULL) {
+    char sum_string[MAXLINE];
+    if (nextline(sum_string, fp) == NULL) {
         fprintf(stderr, "%s: Given file %s is empty.\n", prog, filename);
         return 3;
     }
 
     // Read the contents to be the sum
     int expected_sum;
-    if (sscanf(sum_line, "%d", &expected_sum) != 1) {
+    if (sscanf(sum_string, "%d", &expected_sum) != 1) {
         fprintf(stderr, "%s: Illegal format in %s.\n", prog, filename);
         return 3;
     }
 
     // Read the remaining lines and sum them up
     int sum = 0;
-    char *prod_line;
-    while (getline(prod_line, fp) != NULL) {
+    char prod_line[MAXLINE];
+    while (nextline(prod_line, fp) != NULL) {
         int fac1, fac2;
         if (sscanf(prod_line, "%d * %d", &fac1, &fac2) != 2) {
             fprintf(stderr, "%s: Illegal format in %s.\n", prog, filename);
@@ -76,6 +78,7 @@ int main(int argc, char *argv[])
 }
 
 // A shorthand.
-getline(char *out_string, FILE *fp) {
+char *nextline(char *out_string, FILE *fp)
+{
     return fgets(out_string, MAXLINE, fp);
 }
