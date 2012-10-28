@@ -6,7 +6,8 @@
 #include <assert.h>
 
 #define BUFFSIZE 4096
-#define DIE(MSG, ARG) fprintf(stderr, "%s: " #MSG "\n", prog, ARG)
+#define DIE(MSG, ARG, RETVAL) fprintf(stderr, "%s: " #MSG "\n", prog, ARG); \
+                              return RETVAL
 
 int filecopy(char *, char *);
 int read(int, char *, int);
@@ -22,7 +23,7 @@ int main(int argc, char *argv[])
     }
 
     if (filecopy(argv[1], argv[2]) != 0) {
-        DIE("Problem in copying files %s", "bla");
+        DIE("Problem in copying files %s", "bla", 2);
     }
 
     return 0;
