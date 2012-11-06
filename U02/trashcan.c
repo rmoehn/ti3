@@ -10,9 +10,8 @@
 #include <string.h>
 
 #define BUFFSIZE 4096
-#define DIE(MSG, ARG, RETVAL) fprintf(stderr, "%s: " #MSG "\n", prog, ARG); \
-                              return RETVAL
 #define TRASHDIRMODE 0700
+#define TRASHDIRNAME .ti3_trash
 
 int filecopy(char *, char *);
 int opt_mkhomedir(const char *);
@@ -21,13 +20,25 @@ int main(int argc, char *argv[])
 {
     char *prog = argv[0];
 
+    /* Check arguments */
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <mode> <filename>\n", prog);
         return 1;
     }
 
-    if (filecopy(argv[1], argv[2]) != 0) {
-        DIE("Problem in copying files %s", "bla", 2);
+    /* Look at the first command-line argument and decide what to do. */
+    switch (argv[1][1]) {
+        case 'p':
+            move_to_trash(argv[2]);
+            break;
+        case 'g':
+            recover_from_trash(argv[2]);
+            break;
+        case 'r':
+            finally_delete(argv[2]);
+            break;
+        default:
+            errx(1, "Unknown option %s.", argv[1]);
     }
 
     return 0;
