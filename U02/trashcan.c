@@ -67,5 +67,13 @@ int filecopy(char *infile, char *outfile)
         return 3;
     }
 
+    // Close the two files
+    if (close(in_fd) == -1) {
+        return 1;
+    }
+    if (close(out_fd) == -1) {
+        return 2;
+    }
+
     return 0;
 }
