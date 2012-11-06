@@ -1,16 +1,21 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <err.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <assert.h>
 #include <unistd.h>
+#include <string.h>
 
 #define BUFFSIZE 4096
 #define DIE(MSG, ARG, RETVAL) fprintf(stderr, "%s: " #MSG "\n", prog, ARG); \
                               return RETVAL
+#define TRASHDIRMODE 0700
 
 int filecopy(char *, char *);
+int opt_mkhomedir(const char *);
 
 int main(int argc, char *argv[])
 {
@@ -67,12 +72,45 @@ int filecopy(char *infile, char *outfile)
         return 3;
     }
 
-    // Close the two files
+    /* Close the two files */
     if (close(in_fd) == -1) {
         return 1;
     }
     if (close(out_fd) == -1) {
         return 2;
+    }
+
+    return 0;
+}
+
+/*
+ * Creates a directory with the given name relative to the current
+ * environment's home directory if it doesn't exist already.
+ *
+ * Return 0 on success.
+ * Return 1 on problems with finding the home directory.
+ * Return 2 on problems with creating the directory.
+ */
+int opt_mkhomedir(const char *filename)
+{
+    /* Obtain the current home directory */
+    const char *homedir = getenv("HOME");
+    if (homedir == NULL) {
+        return 1;
+    }
+
+    /* Form the final homedir name and the given filename */
+    size_t dirname_len = strlen(homedir) + strlen(filename) + 2;
+    char dirname[dirname_len];
+    strcpy(dirname, homedir);
+    strcat(dirname, "/");
+    strcat(dirname, filename);
+
+    /* Create the directory if it doesn't exist already */
+    if (mkdir(dirname, TRASHDIRMODE) != 0) {
+        if (errno != EEXIST) {
+            return 2;
+        }
     }
 
     return 0;
