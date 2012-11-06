@@ -4,14 +4,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <assert.h>
+#include <unistd.h>
 
 #define BUFFSIZE 4096
 #define DIE(MSG, ARG, RETVAL) fprintf(stderr, "%s: " #MSG "\n", prog, ARG); \
                               return RETVAL
 
 int filecopy(char *, char *);
-int read(int, char *, int);
-int write(int, char *, int);
 
 int main(int argc, char *argv[])
 {
