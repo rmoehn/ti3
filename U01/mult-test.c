@@ -72,7 +72,13 @@ int main(int argc, char *argv[])
         sum += fac1 * fac2;
     }
 
+    // Print the result
     printf(sum == expected_sum ? "correct\n" : "incorrect\n");
+
+    // Clean up
+    if (fclose(fp) == EOF) {
+        fprintf(stderr, "%s: Error closing file %s.\n", prog, filename);
+    }
 
     return 0;
 }
