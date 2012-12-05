@@ -1,9 +1,6 @@
 #include <stdio.h>
 #include <err.h>
-
-#define INPUT_ERROR 1
-#define OUTPUT_ERROR 2
-#define ARG_ERROR 3
+#include "errors.h"
 
 #define BUFSIZE 4096
 
