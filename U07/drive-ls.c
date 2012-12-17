@@ -10,11 +10,14 @@ u_int16_t read_16(FILE *, long);
 u_int32_t read_32(FILE *, long);
 
 struct fat_info {
-    u_int16_t BPB_BytsPerSec;
-    u_int8_t  BPB_SecPerClus;
-    u_int16_t BPB_RsvdSecCnt;
-    u_int8_t  BPB_NumFATs;
+    u_int16_t BytsPerSec;
+    u_int8_t  SecPerClus;
+    u_int16_t RsvdSecCnt;
+    u_int8_t  NumFATs;
+    u_int16_t RootEntCnt;
     u_int32_t fat_size;
+    u_int32_t first_root_dir_sec_num;
+    u_int32_t first_data_sector;
 };
 
 int main(int argc, const char *argv[])
@@ -32,10 +35,11 @@ int main(int argc, const char *argv[])
 
     // Read the necessary filesystem information
     struct fat_info fs_info;
-    fs_info.BPB_BytsPerSec = read_16(fs_img, 11);
-    fs_info.BPB_SecPerClus = read_8( fs_img, 13);
-    fs_info.BPB_RsvdSecCnt = read_16(fs_img, 14);
-    fs_info.BPB_NumFATs    = read_8( fs_img, 16);
+    fs_info.BytsPerSec = read_16(fs_img, 11);
+    fs_info.SecPerClus = read_8( fs_img, 13);
+    fs_info.RsvdSecCnt = read_16(fs_img, 14);
+    fs_info.NumFATs    = read_8( fs_img, 16);
+    fs_info.RootEntCnt = read_16(fs_img, 17);
 
     // Determine the size of one FAT
     u_int16_t fatsz_16 = read_16(fs_img, 22);
@@ -46,11 +50,26 @@ int main(int argc, const char *argv[])
         fs_info.fat_size = read_32(fs_img, 32);
     }
 
-    printf("%d\n", fs_info.BPB_BytsPerSec);
-    printf("%d\n", fs_info.BPB_SecPerClus);
-    printf("%d\n", fs_info.BPB_RsvdSecCnt);
-    printf("%d\n", fs_info.BPB_NumFATs);
-    printf("%d\n", fs_info.fat_size);
+    // Calculate the number of the first sector of the root directory
+    int root_dir_sectors = (
+                             (fs_info.RootEntCnt * 32)
+                             + (fs_info.BytsPerSec - 1)
+                           ) / fs_info.BytsPerSec;
+    fs_info.first_root_dir_sec_num
+        = fs_info.RsvdSecCnt + (fs_info.NumFATs * fs_info.fat_size);
+
+    // Calculate the number of the first data sector
+    fs_info.first_data_sector
+        = fs_info.first_root_dir_sec_num + root_dir_sectors;
+
+    //printf("%d\n", fs_info.BytsPerSec);
+    //printf("%d\n", fs_info.SecPerClus);
+    //printf("%d\n", fs_info.RsvdSecCnt);
+    //printf("%d\n", fs_info.NumFATs);
+    //printf("%d\n", fs_info.RootEntCnt);
+    //printf("%d\n", fs_info.fat_size);
+    //printf("%d\n", fs_info.first_data_sector);
+    //printf("%d\n", fs_info.first_root_dir_sec_num);
 
     return 0;
 }
