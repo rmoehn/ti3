@@ -7,9 +7,11 @@
 #define IMG_NAME "drive.img"
 #define PATH_DELIM '/'
 #define DIR_ENT_BYTES 32
-#define NO_SUCH_ENTRY -1
+#define NO_SUCH_ENTRY 0
 #define NAME_BYTES 12
-#define NO_MORE_ENTRIES_FCL 1
+#define NO_MORE_ENTRIES_ATTR 0x00
+#define NO_MORE_ENTRIES_FCL 0
+    // Note that these values shouldn't be negative
 
 struct fat_info {
     u_int16_t BytsPerSec;
@@ -26,6 +28,7 @@ struct fat_info {
 
 struct fat_dir_info {
     char      name[NAME_BYTES];
+    u_int8_t  Attr;
     u_int16_t FstClusLO;
 };
 
@@ -67,6 +70,9 @@ int name_equals(char *, char *);
 u_int8_t read_8(FILE *, long);
 u_int16_t read_16(FILE *, long);
 u_int32_t read_32(FILE *, long);
+int is_directory(struct fat_dir_info);
+
+void print_str_hex(char *);
 
 /*
  * Path names must be given in the form BLA1/BLA2/BLA3/ with uppercase letters
@@ -197,7 +203,7 @@ void ls(struct fat_info fs_info, u_int32_t sec_num, char *path)
         u_int32_t path_sec_num = find_path_sec_num(fs_info, sec_num, path);
             // path contains only the first part of the argument path now
         if (path_sec_num == NO_SUCH_ENTRY) {
-            err(NOT_FOUND_ERR, "There is no entry with name %s", path);
+            errx(NOT_FOUND_ERR, "There is no entry with name %s", path);
         }
 
         // List the contents of sub_path relative to the subdirectory
@@ -219,6 +225,11 @@ u_int32_t find_path_sec_num(struct fat_info fs_info, u_int32_t sec_num,
     // Go through the directory entries
     struct fat_dir_info entry;
     while (! is_no_more_entries(entry = next_dir_entry(fs_info, &dit_state))) {
+        // Skip non-directories
+        if (!is_directory(entry)) {
+            continue;
+        }
+
         // Return the indicated sector number if we have found the right entry
         if (name_equals(entry.name, name)) {
             return cluster_to_sec(fs_info, entry.FstClusLO);
@@ -317,6 +328,11 @@ struct fat_dir_info next_dir_entry(struct fat_info fs_info,
 // Return the number of the first sector of the specified cluster number
 u_int32_t cluster_to_sec(struct fat_info fs_info, u_int16_t cluster_nr)
 {
+    // Cluster number 0 indicates root directory
+    if (cluster_nr == 0) {
+        return fs_info.first_root_dir_sec_num;
+    }
+
     return (cluster_nr - 2) * fs_info.SecPerClus + fs_info.first_data_sector;
 }
 
@@ -330,6 +346,7 @@ u_int32_t sec_to_offset(struct fat_info fs_info, u_int32_t sec_nr)
 struct fat_dir_info no_more_entries()
 {
     struct fat_dir_info nme;
+    nme.Attr      = NO_MORE_ENTRIES_ATTR;
     nme.FstClusLO = NO_MORE_ENTRIES_FCL;
     return nme;
 }
@@ -337,7 +354,8 @@ struct fat_dir_info no_more_entries()
 // Check whether the specified entry indicates an exhausted iterator
 int is_no_more_entries(struct fat_dir_info dir_info)
 {
-    if (dir_info.FstClusLO == NO_MORE_ENTRIES_FCL) {
+    if (dir_info.Attr == NO_MORE_ENTRIES_ATTR
+            && dir_info.FstClusLO == NO_MORE_ENTRIES_FCL) {
         return 1;
     }
 
@@ -368,12 +386,12 @@ void sprint_filename(char *out_name, char *in_name)
     if (*(in_name + 8) != 0x20) {
         *first_end = '.';
         strncpy(first_end + 1, in_name + 8, 3);
+    }
 
-        // Remove possible whitespace
-        char *end = strchr(out_name, 0x20);
-        if (end != NULL) {
-            *end = '\0';
-        }
+    // Remove possible whitespace
+    char *end = strchr(out_name, 0x20);
+    if (end != NULL) {
+        *end = '\0';
     }
 }
 
@@ -384,7 +402,7 @@ int name_equals(char *fat_name, char *normal_name)
     char normalised_fat_name[NAME_BYTES + 1];
     sprint_filename(normalised_fat_name, fat_name);
 
-    return strcmp(normalised_fat_name, normal_name);
+    return strcmp(normalised_fat_name, normal_name) == 0;
 }
 
 // Return the number of the cluster in the specified cluster in the chain
@@ -437,10 +455,20 @@ struct fat_dir_info read_dir_entry(FILE *file, long offset)
         err(INPUT_ERR, "Cannot return to old position in file");
     }
 
+    // Read the attributes for the entry
+    dir_info.Attr = read_8(file, offset + 11);
+
     // Read the cluster number the entry points to
     dir_info.FstClusLO = read_16(file, offset + 26);
 
     return dir_info;
+}
+
+// Determines whether the specified directory entry belongs to a directory or
+// not
+int is_directory(struct fat_dir_info dir_info)
+{
+    return (dir_info.Attr & 0x10) != 0;
 }
 
 // Return the 8-bit number at the specified offset in the specified file
@@ -493,4 +521,12 @@ u_int32_t read_32(FILE *file, long offset)
 
     // Return their combination into a 16-bit number
     return (upper_word << 16) + lower_word;
+}
+
+void print_str_hex(char *str)
+{
+    while (*str != 0) {
+        printf("%x\n", *str);
+        ++str;
+    }
 }
