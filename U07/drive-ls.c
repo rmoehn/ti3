@@ -8,8 +8,8 @@
 #define PATH_DELIM '/'
 #define DIR_ENT_BYTES 32
 #define NO_SUCH_ENTRY -1
-#define NAME_BYTES 11
-#define NO_MORE_ENTRIES_STRUCT { "", -1 };
+#define NAME_BYTES 12
+#define NO_MORE_ENTRIES_FCL 1
 
 struct fat_info {
     u_int16_t BytsPerSec;
@@ -25,7 +25,7 @@ struct fat_info {
 };
 
 struct fat_dir_info {
-    char      name[11];
+    char      name[NAME_BYTES];
     u_int16_t FstClusLO;
 };
 
@@ -55,28 +55,25 @@ struct dir_entry_iterator_state new_dir_entry_iterator(struct fat_info,
                                                        u_int32_t);
 struct fat_dir_info next_dir_entry(struct fat_info,
         struct dir_entry_iterator_state *);
-
-int name_equals(char *, char *);
 u_int32_t cluster_to_sec(struct fat_info, u_int16_t);
 u_int32_t sec_to_offset(struct fat_info, u_int32_t);
-void sprint_filename(char *, char *);
-int is_last_entry(struct fat_dir_info);
+int is_no_more_entries(struct fat_dir_info);
 struct fat_dir_info no_more_entries();
 u_int16_t get_next_cluster_nr(struct fat_info, u_int16_t);
 int is_eoc(u_int16_t);
-struct fat_dir_info read_dir_entry(FILE *, u_int32_t);
-
+struct fat_dir_info read_dir_entry(FILE *, long);
+void sprint_filename(char *, char *);
+int name_equals(char *, char *);
 u_int8_t read_8(FILE *, long);
 u_int16_t read_16(FILE *, long);
 u_int32_t read_32(FILE *, long);
 
+/*
+ * Path names must be given in the form BLA1/BLA2/BLA3/ with uppercase letters
+ * and trailing slash. No argument asks for printing the root directory.
+ */
 int main(int argc, char *argv[])
 {
-    // Check arguments
-    if (argc != 2) {
-        errx(ARG_ERR, "Directory name must be only command line argument");
-    }
-
     // Open the filesystem image
     FILE *fs_img = fopen(IMG_NAME, "r");
     if (fs_img == NULL) {
@@ -127,7 +124,12 @@ int main(int argc, char *argv[])
 
     // List the specified directory's contents
     fs_info.fs_img = fs_img;
-    ls(fs_info, fs_info.first_root_dir_sec_num , argv[1]);
+    if (argc == 1) {
+        ls(fs_info, fs_info.first_root_dir_sec_num , "");
+    }
+    else {
+        ls(fs_info, fs_info.first_root_dir_sec_num , argv[1]);
+    }
 
     return 0;
 }
@@ -165,17 +167,21 @@ void ls(struct fat_info fs_info, u_int32_t sec_num, char *path)
      * that directory are printed.
      */
 
-    // List contents of directory at sec_num if only '/' is left as path
+    // List contents of directory at sec_num if nothing is left as path
     if (strlen(path) == 0) {
         // Initialise the iterator for directory entries
         struct dir_entry_iterator_state dit_state
             = new_dir_entry_iterator(fs_info, sec_num);
 
         // Go through the directory entries
-        struct fat_dir_info entry;
-        while (! is_last_entry(entry = next_dir_entry(fs_info, &dit_state))) {
+        while (1) {
+            struct fat_dir_info entry = next_dir_entry(fs_info, &dit_state);
+            if (is_no_more_entries(entry)) {
+                break;
+            }
+
             // Print them
-            char pretty_name[NAME_BYTES];
+            char pretty_name[NAME_BYTES + 1];
             sprint_filename(pretty_name, entry.name);
             puts(pretty_name);
         }
@@ -190,6 +196,9 @@ void ls(struct fat_info fs_info, u_int32_t sec_num, char *path)
         // Find the directory entry with that name in the directory at sec_num
         u_int32_t path_sec_num = find_path_sec_num(fs_info, sec_num, path);
             // path contains only the first part of the argument path now
+        if (path_sec_num == NO_SUCH_ENTRY) {
+            err(NOT_FOUND_ERR, "There is no entry with name %s", path);
+        }
 
         // List the contents of sub_path relative to the subdirectory
         ls(fs_info, path_sec_num, sub_path);
@@ -209,7 +218,7 @@ u_int32_t find_path_sec_num(struct fat_info fs_info, u_int32_t sec_num,
 
     // Go through the directory entries
     struct fat_dir_info entry;
-    while (! is_last_entry(entry = next_dir_entry(fs_info, &dit_state))) {
+    while (! is_no_more_entries(entry = next_dir_entry(fs_info, &dit_state))) {
         // Return the indicated sector number if we have found the right entry
         if (name_equals(entry.name, name)) {
             return cluster_to_sec(fs_info, entry.FstClusLO);
@@ -242,6 +251,7 @@ struct dir_entry_iterator_state new_dir_entry_iterator(
     }
 
     dit_state.cluster_offset = sec_to_offset(fs_info, sec_num);
+    //printf("co: %d", dit_state.cluster_offset);
     dit_state.entry_nr       = -1;
         // See above for descriptions of the struct's fields
 
@@ -276,12 +286,18 @@ struct fat_dir_info next_dir_entry(struct fat_info fs_info,
         }
     }
 
+    // Calculate the offset of the start of the directory
+    long offset = dit_state->cluster_offset
+                  + dit_state->entry_nr * DIR_ENT_BYTES;
+
+    //printf("co: %d\nen: %d\n", dit_state->cluster_offset, dit_state->entry_nr);
+    // If we're in the root directory, skip the entry if its the VOLUME_ID one
+    if ((read_8(fs_info.fs_img, offset + 11) & 0x08) != 0) {
+        return next_dir_entry(fs_info, dit_state);
+    }
+
     // Read in the current directory entry
-    struct fat_dir_info cur_entry = read_dir_entry(
-                                        fs_info.fs_img,
-                                        dit_state->cluster_offset
-                                        + dit_state->entry_nr * DIR_ENT_BYTES
-                                    );
+    struct fat_dir_info cur_entry = read_dir_entry(fs_info.fs_img, offset);
 
     // Stop if we are at a last directory entry
     if (*(cur_entry.name) == 0x00) {
@@ -298,6 +314,135 @@ struct fat_dir_info next_dir_entry(struct fat_info fs_info,
     return cur_entry;
 }
 
+// Return the number of the first sector of the specified cluster number
+u_int32_t cluster_to_sec(struct fat_info fs_info, u_int16_t cluster_nr)
+{
+    return (cluster_nr - 2) * fs_info.SecPerClus + fs_info.first_data_sector;
+}
+
+// Return the byte offset of the specified sector number
+u_int32_t sec_to_offset(struct fat_info fs_info, u_int32_t sec_nr)
+{
+    return sec_nr * fs_info.BytsPerSec;
+}
+
+// Generate return value for exhausted directory iterator
+struct fat_dir_info no_more_entries()
+{
+    struct fat_dir_info nme;
+    nme.FstClusLO = NO_MORE_ENTRIES_FCL;
+    return nme;
+}
+
+// Check whether the specified entry indicates an exhausted iterator
+int is_no_more_entries(struct fat_dir_info dir_info)
+{
+    if (dir_info.FstClusLO == NO_MORE_ENTRIES_FCL) {
+        return 1;
+    }
+
+    return 0;
+}
+
+// Convert a filename from the FAT format to a *.* format
+void sprint_filename(char *out_name, char *in_name)
+{
+    /*
+     * Let in_name be "PICKLE__A__" (_ indicate blanks).
+     * First we clean out out_name, so that it is "0000000000000".
+     * Then we copy over the first part, so that out_name is "PICKLE__00000"
+     * now. We place a dot and the extension at the end of it: "PICKLE.A__000"
+     * Last, we remove trailing whitespace: "PICKLE.A0_000".
+     */
+
+    // Clean the output name
+    memset(out_name, 0, NAME_BYTES);
+
+    // Copy the first part of the FAT name into the ouput
+    strncpy(out_name, in_name, 8);
+
+    // Locate the end of the first part
+    char *first_end = strpbrk(out_name, "\x20\x00");
+
+    // Place a dot there and the extension (if there is one)
+    if (*(in_name + 8) != 0x20) {
+        *first_end = '.';
+        strncpy(first_end + 1, in_name + 8, 3);
+
+        // Remove possible whitespace
+        char *end = strchr(out_name, 0x20);
+        if (end != NULL) {
+            *end = '\0';
+        }
+    }
+}
+
+// Compare a FAT format directory entry name with a name in *.* format for
+// equality.
+int name_equals(char *fat_name, char *normal_name)
+{
+    char normalised_fat_name[NAME_BYTES + 1];
+    sprint_filename(normalised_fat_name, fat_name);
+
+    return strcmp(normalised_fat_name, normal_name);
+}
+
+// Return the number of the cluster in the specified cluster in the chain
+u_int16_t get_next_cluster_nr(struct fat_info fs_info, u_int16_t cluster_nr)
+{
+    // Calculate the location of the entry for cluster_nr in the FAT
+    u_int32_t fat_offset = cluster_nr * 2;
+    u_int32_t fat_sec_num
+        = fs_info.RsvdSecCnt + (fat_offset / fs_info.BytsPerSec);
+    u_int16_t fat_ent_offset = fat_offset % fs_info.BytsPerSec;
+
+    return read_16(
+               fs_info.fs_img,
+               sec_to_offset(fs_info, fat_sec_num) + fat_ent_offset
+           );
+}
+
+// Check whether the specified FAT entry is an EOC mark
+int is_eoc(u_int16_t fat_entry)
+{
+    if (fat_entry >= 0xfff8) {
+        return 1;
+    }
+
+    return 0;
+}
+
+// Return the directory entry at the specified byte offset
+struct fat_dir_info read_dir_entry(FILE *file, long offset)
+{
+    // Store the current offset
+    long old_offset = ftell(file);
+    if (old_offset == -1) {
+        err(INPUT_ERR, "Unable to get position in file");
+    }
+
+    // Move to the specified offset
+    if (fseek(file, offset, SEEK_SET) == -1) {
+        err(INPUT_ERR, "Unable to move poisition in file");
+    }
+
+    // Read the entry name
+    struct fat_dir_info dir_info;
+    if (fgets(dir_info.name, NAME_BYTES, file) == NULL) {
+        err(INPUT_ERR, "Error reading");
+    }
+
+    // Go back to the old position
+    if (fseek(file, old_offset, SEEK_SET) == -1) {
+        err(INPUT_ERR, "Cannot return to old position in file");
+    }
+
+    // Read the cluster number the entry points to
+    dir_info.FstClusLO = read_16(file, offset + 26);
+
+    return dir_info;
+}
+
 // Return the 8-bit number at the specified offset in the specified file
 u_int8_t read_8(FILE *file, long offset)
 {
@@ -307,7 +452,7 @@ u_int8_t read_8(FILE *file, long offset)
         err(INPUT_ERR, "Unable to get position in file");
     }
 
-    // Move to the position before the specified offset
+    // Move to the specified offset
     if (fseek(file, offset, SEEK_SET) == -1) {
         err(INPUT_ERR, "Unable to move poisition in file");
     }
