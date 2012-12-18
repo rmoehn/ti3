@@ -72,8 +72,6 @@ u_int16_t read_16(FILE *, long);
 u_int32_t read_32(FILE *, long);
 int is_directory(struct fat_dir_info);
 
-void print_str_hex(char *);
-
 /*
  * Path names must be given in the form BLA1/BLA2/BLA3/ with uppercase letters
  * and trailing slash. No argument asks for printing the root directory.
@@ -118,15 +116,6 @@ int main(int argc, char *argv[])
     // Calculate the maximum number of directory entries per cluster
     fs_info.dir_ents_per_cluster
         = fs_info.BytsPerSec * fs_info.SecPerClus / DIR_ENT_BYTES;
-
-    //printf("%d\n", fs_info.BytsPerSec);
-    //printf("%d\n", fs_info.SecPerClus);
-    //printf("%d\n", fs_info.RsvdSecCnt);
-    //printf("%d\n", fs_info.NumFATs);
-    //printf("%d\n", fs_info.RootEntCnt);
-    //printf("%d\n", fs_info.fat_size);
-    //printf("%d\n", fs_info.first_data_sector);
-    //printf("%d\n", fs_info.first_root_dir_sec_num);
 
     // List the specified directory's contents
     fs_info.fs_img = fs_img;
@@ -262,7 +251,6 @@ struct dir_entry_iterator_state new_dir_entry_iterator(
     }
 
     dit_state.cluster_offset = sec_to_offset(fs_info, sec_num);
-    //printf("co: %d", dit_state.cluster_offset);
     dit_state.entry_nr       = -1;
         // See above for descriptions of the struct's fields
 
@@ -301,7 +289,6 @@ struct fat_dir_info next_dir_entry(struct fat_info fs_info,
     long offset = dit_state->cluster_offset
                   + dit_state->entry_nr * DIR_ENT_BYTES;
 
-    //printf("co: %d\nen: %d\n", dit_state->cluster_offset, dit_state->entry_nr);
     // If we're in the root directory, skip the entry if its the VOLUME_ID one
     if ((read_8(fs_info.fs_img, offset + 11) & 0x08) != 0) {
         return next_dir_entry(fs_info, dit_state);
@@ -521,12 +508,4 @@ u_int32_t read_32(FILE *file, long offset)
 
     // Return their combination into a 16-bit number
     return (upper_word << 16) + lower_word;
-}
-
-void print_str_hex(char *str)
-{
-    while (*str != 0) {
-        printf("%x\n", *str);
-        ++str;
-    }
 }
