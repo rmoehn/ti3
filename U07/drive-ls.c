@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <sys/types.h>
+#include <string.h>
 #include "errors.h"
 #include <err.h>
 
@@ -8,10 +9,7 @@
 #define DIR_ENT_BYTES 32
 #define NO_SUCH_ENTRY -1
 #define NAME_BYTES 11
-
-u_int8_t read_8(FILE *, long);
-u_int16_t read_16(FILE *, long);
-u_int32_t read_32(FILE *, long);
+#define NO_MORE_ENTRIES_STRUCT { "", -1 };
 
 struct fat_info {
     u_int16_t BytsPerSec;
@@ -23,6 +21,7 @@ struct fat_info {
     u_int32_t first_root_dir_sec_num;
     u_int32_t first_data_sector;
     u_int16_t dir_ents_per_cluster;
+    FILE      *fs_img;
 };
 
 struct fat_dir_info {
@@ -30,9 +29,48 @@ struct fat_dir_info {
     u_int16_t FstClusLO;
 };
 
+struct dir_entry_iterator_state {
+    // Indicates whether we're traversing the root directory or not
+    u_int8_t is_root_dir;
 
+    // The maximum number of directory entries in this cluster (or root dir)
+    u_int16_t max_entry_cnt;
 
-int main(int argc, const char *argv[])
+    // The number of the current cluster (or -1 for root directory)
+    u_int16_t cluster_nr;
+
+    // The byte offset of the start of the current cluster (or root directory)
+    u_int32_t cluster_offset;
+
+    // The number of the entry examined last in the cluster
+    u_int16_t entry_nr;
+
+    // The entry at entry_nr
+    struct fat_dir_info cur_entry;
+};
+
+void ls(struct fat_info, u_int32_t, char *);
+u_int32_t find_path_sec_num(struct fat_info, u_int32_t, char *);
+struct dir_entry_iterator_state new_dir_entry_iterator(struct fat_info,
+                                                       u_int32_t);
+struct fat_dir_info next_dir_entry(struct fat_info,
+        struct dir_entry_iterator_state *);
+
+int name_equals(char *, char *);
+u_int32_t cluster_to_sec(struct fat_info, u_int16_t);
+u_int32_t sec_to_offset(struct fat_info, u_int32_t);
+void sprint_filename(char *, char *);
+int is_last_entry(struct fat_dir_info);
+struct fat_dir_info no_more_entries();
+u_int16_t get_next_cluster_nr(struct fat_info, u_int16_t);
+int is_eoc(u_int16_t);
+struct fat_dir_info read_dir_entry(FILE *, u_int32_t);
+
+u_int8_t read_8(FILE *, long);
+u_int16_t read_16(FILE *, long);
+u_int32_t read_32(FILE *, long);
+
+int main(int argc, char *argv[])
 {
     // Check arguments
     if (argc != 2) {
@@ -88,6 +126,7 @@ int main(int argc, const char *argv[])
     //printf("%d\n", fs_info.first_root_dir_sec_num);
 
     // List the specified directory's contents
+    fs_info.fs_img = fs_img;
     ls(fs_info, fs_info.first_root_dir_sec_num , argv[1]);
 
     return 0;
@@ -128,7 +167,18 @@ void ls(struct fat_info fs_info, u_int32_t sec_num, char *path)
 
     // List contents of directory at sec_num if only '/' is left as path
     if (strlen(path) == 0) {
-        // List contents of directory at sec_num
+        // Initialise the iterator for directory entries
+        struct dir_entry_iterator_state dit_state
+            = new_dir_entry_iterator(fs_info, sec_num);
+
+        // Go through the directory entries
+        struct fat_dir_info entry;
+        while (! is_last_entry(entry = next_dir_entry(fs_info, &dit_state))) {
+            // Print them
+            char pretty_name[NAME_BYTES];
+            sprint_filename(pretty_name, entry.name);
+            puts(pretty_name);
+        }
     }
     // Go one level down the directory hierarchy
     else {
@@ -153,60 +203,99 @@ void ls(struct fat_info fs_info, u_int32_t sec_num, char *path)
 u_int32_t find_path_sec_num(struct fat_info fs_info, u_int32_t sec_num,
                             char *name)
 {
-    // Determine how many entries we have to search at most
-    u_int16_t max_entry_cnt;
-    if (is_root_dir(fs_info, sec_num)) {
-        max_entry_cnt = fs_info.RootEntCnt;
+    // Initialise the iterator for directory entries
+    struct dir_entry_iterator_state dit_state
+        = new_dir_entry_iterator(fs_info, sec_num);
+
+    // Go through the directory entries
+    struct fat_dir_info entry;
+    while (! is_last_entry(entry = next_dir_entry(fs_info, &dit_state))) {
+        // Return the indicated sector number if we have found the right entry
+        if (name_equals(entry.name, name)) {
+            return cluster_to_sec(fs_info, entry.FstClusLO);
+        }
+    }
+
+    // Return failure if there are no more entries
+    return NO_SUCH_ENTRY;
+}
+
+// Construct an iterator for traversing a directory. The start of the
+// directory is indicated by sec_num, which must be the number of first sector
+// of a cluster.
+struct dir_entry_iterator_state new_dir_entry_iterator(
+        struct fat_info fs_info, u_int32_t sec_num)
+{
+    struct dir_entry_iterator_state dit_state;
+
+    // Set some values depending on whether we're in the root directory or not
+    if (sec_num == fs_info.first_root_dir_sec_num) {
+        dit_state.is_root_dir   = 1;
+        dit_state.max_entry_cnt = fs_info.RootEntCnt;
+        dit_state.cluster_nr    = -1;
     }
     else {
-        max_entry_cnt = fs_info.dir_ents_per_cluster;
+        dit_state.is_root_dir   = 0;
+        dit_state.max_entry_cnt = fs_info.dir_ents_per_cluster;
+        dit_state.cluster_nr    = (sec_num - fs_info.first_data_sector)
+                                  / fs_info.SecPerClus + 2;
     }
 
-    // Calculate where sector sector_nr is in the filesystem
-    u_int32_t offset = sec_to_offset(fs_info, sec_num);
+    dit_state.cluster_offset = sec_to_offset(fs_info, sec_num);
+    dit_state.entry_nr       = -1;
+        // See above for descriptions of the struct's fields
 
-    // Search the entries
-    for (u_int16_t entry_nr = 0; entry_nr < max_entry_cnt; ++entry_nr) {
-        // Calculate the offset of the current entry
-        u_int32_t entry_offset = offset + entry_nr * DIR_ENT_BYTES;
+    return dit_state;
+}
 
-        // Obtain the name of this entry
-        char entry_name[NAME_BYTES];
-        read_dir_entry_name(entry_name, sec_num);
+// Look whether there are more entries in the traversed directory.
+struct fat_dir_info next_dir_entry(struct fat_info fs_info,
+                                   struct dir_entry_iterator_state *dit_state)
+{
+    // Increment entry number
+    ++(dit_state->entry_nr);
 
-        // Skip the entry if there is nothing in it
-        if (*entry_name == 0xe5) {
-            continue;
+    // Check whether we're at the end of a directory
+    if (dit_state->entry_nr == dit_state->max_entry_cnt) {
+        // We have no more entries if we're at the end of the root directory
+        if (dit_state->is_root_dir) {
+            return no_more_entries();
         }
 
-        // Abort the search if there are no more entries
-        if (*entry_name == 0x00) {
-            return NO_SUCH_ENTRY;
+        // Otherwise go to the next cluster in the chain if it exists
+        u_int16_t next_cluster_nr
+            = get_next_cluster_nr(fs_info, dit_state->cluster_nr);
+        if (is_eoc(next_cluster_nr)) {
+            return no_more_entries();
         }
-
-        // Return the sector number the entry points to
-        if (namecmp(entry_name, name)) {
-            return cluster_to_sec(read_16(entry_offset + 26));
+        else {
+            dit_state->cluster_nr = next_cluster_nr;
+            dit_state->cluster_offset
+                = cluster_to_sec(fs_info, next_cluster_nr);
+            dit_state->entry_nr   = -1;
         }
     }
 
-    // We are finished if we were searching the root directory
-    if (is_root_dir(fs_info, sec_num)) {
-        return NO_SUCH_ENTRY;
+    // Read in the current directory entry
+    struct fat_dir_info cur_entry = read_dir_entry(
+                                        fs_info.fs_img,
+                                        dit_state->cluster_offset
+                                        + dit_state->entry_nr * DIR_ENT_BYTES
+                                    );
 
-    // We are finished too if this one was the last cluster in the chain
-    u_int16_t next_cluster_nr = get_next_cluster_nr(fs_info, sec_num);
-    if (is_eoc(next_cluster_nr)) {
-        return NO_SUCH_ENTRY;
+    // Stop if we are at a last directory entry
+    if (*(cur_entry.name) == 0x00) {
+        --(dit_state->entry_nr);
+            // So that we're at the same entry in the next call
+        return no_more_entries();
     }
-    // If not, continue the search in the next cluster
-    else {
-        return find_path_sec_num(
-                   fs_info,
-                   cluster_to_sec(next_cluster_nr),
-                   name
-               );
+
+    // Skip the entry if it is empty
+    if (*(cur_entry.name) == 0xe5) {
+        return next_dir_entry(fs_info, dit_state);
     }
+
+    return cur_entry;
 }
 
 // Return the 8-bit number at the specified offset in the specified file
