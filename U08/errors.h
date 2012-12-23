@@ -3,3 +3,4 @@
 #define RECV_ERROR 3
 #define SEND_ERROR 4
 #define INPUT_ERROR 5
+#define OUTPUT_ERROR 6
