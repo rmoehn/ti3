@@ -42,7 +42,6 @@ int main(int argc, char *argv[])
     // Create the socket address
     struct sockaddr_in6 sock_addr;
     memset(&sock_addr, 0, sizeof(struct sockaddr_in6));
-    sock_addr.sin6_family   = AF_INET6;
     sock_addr.sin6_port     = htons(atoi(argv[2]));
     sock_addr.sin6_flowinfo = 0;
     sock_addr.sin6_addr     = address;

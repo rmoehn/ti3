@@ -34,13 +34,12 @@ int main(int argc, char *argv[])
     }
 
     // Create the socket address
-    struct sockaddr_in6 sock_addr = {
-        .sin6_family   = AF_INET6,
-        .sin6_port     = htons(atoi(argv[2])),
-        .sin6_flowinfo = 0,
-        .sin6_addr     = address,
-        .sin6_scope_id = 0
-    };
+    struct sockaddr_in6 sock_addr;
+    memset(&sock_addr, 0, sizeof(struct sockaddr_in6));
+    sock_addr.sin6_port     = htons(atoi(argv[2]));
+    sock_addr.sin6_flowinfo = 0;
+    sock_addr.sin6_addr     = address;
+    sock_addr.sin6_scope_id = 0;
 
     // Bind the socket to the specified address and port
     if (connect(
@@ -50,6 +49,17 @@ int main(int argc, char *argv[])
         ) == -1) {
         err(SOCK_ERROR, "Cannot connect socket");
     }
+
+    fprintf(stdout, "Here0\n");
+    char bla[4] = "bla";
+    send(sock_fd, bla, 4, 0);
+        err(SEND_ERROR, "Cannot send");
+    fprintf(stdout, "Here1\n");
+    fprintf(stdout, "Here2\n");
+
+    fprintf(stdout, "Here3\n");
+    fflush(stdout);
+
 
     // Look what the server sends
     char buffer[MAX_MSG_LEN];
