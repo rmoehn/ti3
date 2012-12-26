@@ -22,7 +22,7 @@ int main(int argc, char *argv[])
     }
 
     // Create a socket
-    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int sock_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if (sock_fd == -1) {
         err(SOCK_ERROR, "Cannot create socket");
     }
@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
     if (connect(
             sock_fd,
             (struct sockaddr *) &sock_addr,
-            sizeof(struct sockaddr)
+            sizeof(struct sockaddr_in6)
         ) == -1) {
         err(SOCK_ERROR, "Cannot connect socket");
     }

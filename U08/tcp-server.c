@@ -10,8 +10,13 @@
 #include <time.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
 #define BACKLOG_SIZE 7
+
+void shut_down(int);
+FILE *logfile;
+int sock_fd;
 
 int main(int argc, char *argv[])
 {
@@ -21,14 +26,22 @@ int main(int argc, char *argv[])
                         " <path to logfile>");
     }
 
+    // Shut down properly on SIGINT
+    struct sigaction shutdown_handler;
+    memset(&shutdown_handler, 0, sizeof(struct sigaction));
+    shutdown_handler.sa_handler = shut_down;
+    if (sigaction(2, &shutdown_handler, NULL) == -1) {
+        err(SIG_ERROR, "Cannot install handler for SIGINT");
+    }
+
     // Open the log file
-    FILE *logfile = fopen(argv[3], "a");
+    logfile = fopen(argv[3], "a");
     if (logfile == NULL) {
         err(OUTPUT_ERROR, "Cannot open %s for appending", argv[3]);
     }
 
     // Create a socket
-    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    sock_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if (sock_fd == -1) {
         err(SOCK_ERROR, "Cannot create socket");
     }
@@ -52,7 +65,7 @@ int main(int argc, char *argv[])
     if (bind(
             sock_fd,
             (struct sockaddr *) &sock_addr,
-            sizeof(struct sockaddr)
+            sizeof(struct sockaddr_in6)
         ) == -1) {
         err(SOCK_ERROR, "Cannot bind socket");
     }
@@ -87,6 +100,7 @@ int main(int argc, char *argv[])
             ntohs(client_address.sin6_port),
             (int) time(NULL)
         );
+        fflush(logfile);
 
         // Ditch the client
         if (send(client_sock_fd, SERVER_CANCEL, strlen(SERVER_CANCEL) + 1, 0)
@@ -99,4 +113,20 @@ int main(int argc, char *argv[])
     }
 
     return 0;
+}
+
+// Shut the server down properly
+void shut_down(int sig_nr)
+{
+    // Close the logfile
+    if (fclose(logfile) == EOF) {
+        err(OUTPUT_ERROR, "Problem closing the logfile");
+    }
+
+    // Close the socket
+    if (close(sock_fd) == -1) {
+        err(SOCK_ERROR, "Problem closing server's socket");
+    }
+
+    exit(0);
 }
