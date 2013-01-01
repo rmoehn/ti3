@@ -4,3 +4,4 @@
 #define SEND_ERROR 4
 #define INPUT_ERROR 5
 #define OUTPUT_ERROR 6
+#define SIG_ERROR 7
