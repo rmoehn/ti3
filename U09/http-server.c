@@ -19,6 +19,7 @@
 volatile sig_atomic_t got_SIGINT = 0;
 void handle_SIGINT(int sig_num)
 {
+    printf("Handling signal\n");
     got_SIGINT = 1;
 }
 
@@ -43,9 +44,9 @@ int main(int argc, char *argv[])
 
     // Install a handler for SIGINT
     struct sigaction SIGINT_action;
-    SIGINT_action.sa_handler   = handle_SIGINT;
-    SIGINT_action.sa_sigaction = NULL;
-    sigfillset( &(SIGINT_action.sa_mask) );
+    SIGINT_action.sa_handler = handle_SIGINT;
+    SIGINT_action.sa_flags   = 0;
+    sigfillset( &SIGINT_action.sa_mask );
     if (sigaction(SIGINT, &SIGINT_action, NULL) == -1) {
         err(ERR_SIGNAL, "Cannot install handler for SIGINT");
     }
@@ -65,6 +66,7 @@ int main(int argc, char *argv[])
     // Create the socket address
     struct sockaddr_in6 sock_addr;
     memset(&sock_addr, 0, sizeof(struct sockaddr_in6));
+    sock_addr.sin6_family   = AF_INET6;
     sock_addr.sin6_port     = htons(atoi(argv[2]));
     sock_addr.sin6_flowinfo = 0;
     sock_addr.sin6_addr     = address;
@@ -114,7 +116,7 @@ int main(int argc, char *argv[])
 
         // Shut down gracefully on SIGINT
         if (got_SIGINT) {
-            warn("Caught SIGINT. Shutting down. ");
+            warnx("Caught SIGINT. Shutting down. ");
             int is_proper_shutdown = 1;
 
             // Close client sockets
@@ -162,7 +164,7 @@ int main(int argc, char *argv[])
 
             // Log some information about the connection
             char addr_string[INET6_ADDRSTRLEN];
-            warn(
+            warnx(
                 "A: %s\tT: %d\tS: %d\n",
                 inet_ntop(
                     AF_INET6,
