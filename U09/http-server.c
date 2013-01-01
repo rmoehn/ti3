@@ -14,6 +14,7 @@
 
 #define BACKLOG_SIZE 7
 #define MAX_CLIENT_CNT 50
+#define MAX_REQUEST_LINE_LEN 500
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 volatile sig_atomic_t got_SIGINT = 0;
@@ -175,6 +176,38 @@ int main(int argc, char *argv[])
                 (int) time(NULL),
                 client_sock_fd
             );
+        }
+
+        // Go through all registered clients
+        for (int i = 0; i < client_cnt; ++i) {
+            // If there is a request
+            char request_line[MAX_REQUEST_LINE_LEN + 1];
+            if (FD_ISSET(client_fds[i], &readfds)) {
+                // Read some data from it
+                int read_bytes_cnt
+                    = read(client_fds[i], request_line, MAX_REQUEST_LINE_LEN);
+
+                // Proceed if the client had nothing to say after all
+                if (read_bytes_cnt == 0) {
+                    warnx(
+                        "Immediate end of file at descriptor %d",
+                        client_fds[i]
+                    );
+                    continue;
+                }
+
+                // Handle error
+                if (read_bytes_cnt == -1) {
+                    warn("Error at descriptor %d", client_fds[i]);
+                    warnx("Trying to close it.");
+
+                    if (close(client_fds[i]) == -1) {
+                        warn("Error closing descriptor %d", client_fds[i]);
+                        warnx("Ignoring it from now on.");
+                        REMOVE CLIENT FROM LIST;
+                    }
+                }
+            }
         }
     }
 
