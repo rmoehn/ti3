@@ -15,12 +15,10 @@
 #include "errors.h"
 
 #define STATUS_200 "200 OK"
-#define STATUS_414 "414 Request-URI Too Large"
+#define STATUS_400 "400 Bad Request"
 #define STATUS_501 "501 Not Implemented"
-#define STATUS_505 "505 HTTP Version not supported"
 #define STATUS_404 "404 Not Found"
 #define STATUS_500 "500 Internal Server Error"
-#define STATUS_415 "415 Unsupported Media Type"
 
 #define BACKLOG_SIZE 7
 #define MAX_CLIENT_CNT 50
@@ -231,7 +229,7 @@ int main(int argc, char *argv[])
                 // Check whether we received the whole request line
                 char *end_of_rline = strchr(request_line, '\n');
                 if (end_of_rline == NULL) {
-                    respond(STATUS_414, client_fd);
+                    respond(STATUS_400, client_fd);
                     continue;
                 }
 
@@ -240,19 +238,27 @@ int main(int argc, char *argv[])
                 warnx("Received request: %s", request_line);
 
                 // Reject everything that isn't a GET request
-                char *uri  = strchr(request_line, ' ') + 1;
-                *(uri - 1) = '\0';
+                char *uri  = strchr(request_line, '/') + 1;
+                *(uri - 2) = '\0';
                 if (strcmp(request_line, "GET") != 0) {
+                    puts("Unsupported GET");
                     respond(STATUS_501, client_fd);
                     continue;
                 }
 
-                // Reject non-HTTP/1.1 requests
-                char *http_version  = strchr(uri, ' ');
+                // Reject non-HTTP/1.0 requests
+                char *http_version  = strchr(uri, ' ') + 1;
                 *(http_version - 1) = '\0';
-                if (strcmp(http_version, "HTTP/1.1") != 0) {
-                    respond(STATUS_505, client_fd);
+                char *version_dot   = strchr(http_version, '.');
+                *(version_dot + 2)  = '\0'; // Just handling newlines.
+                if (strcmp(http_version, "HTTP/1.0") != 0) {
+                    respond(STATUS_501, client_fd);
                     continue;
+                }
+
+                // Use index.html as URI if only / was specified
+                if (strlen(uri) == 0) {
+                    strcpy(uri, "index.html");
                 }
 
                 // Get information about the requested file
@@ -275,12 +281,12 @@ int main(int argc, char *argv[])
 
                 // Guess the MIME type of the file from the file name
                 char mime_type[MAX_MIME_LEN + 1];
-                char *filename_ext = http_version - 4;
-                if (strcmp(filename_ext, "tml") == 0
+                char *filename_ext = strrchr(uri, '.') + 1;
+                if (strcmp(filename_ext, "html") == 0
                         || strcmp(filename_ext, "htm") == 0) {
                     strcpy(mime_type, "text/html");
                 }
-                else if (strcmp(filename_ext, "peg") == 0
+                else if (strcmp(filename_ext, "jpeg") == 0
                         || strcmp(filename_ext, "jpg") == 0) {
                     strcpy(mime_type, "image/jpeg");
                 }
@@ -294,7 +300,7 @@ int main(int argc, char *argv[])
                         client_fd,
                         filename_ext
                     );
-                    respond(STATUS_415, client_fd);
+                    respond(STATUS_400, client_fd);
                     continue;
                 }
 
@@ -308,7 +314,7 @@ int main(int argc, char *argv[])
                 memset(header, 0, header_len + 1);
                 sprintf(
                     header,
-                    "HTTP/1.1 200 OK\n"
+                    "HTTP/1.0 200 OK\n"
                     "Content-Type: %s\n"
                     "Connection: close\n"
                     "Content-Length: %ld\n"
@@ -345,7 +351,7 @@ int main(int argc, char *argv[])
                 // Send the contents to the client
                 char buf[BUFSIZE];
                 size_t bytes_read;
-                while ((bytes_read = fread(buf, BUFSIZE, 1, infile)) != 0) {
+                while ((bytes_read = fread(buf, 1, BUFSIZE, infile)) > 0) {
                     if (send(client_fd, buf, bytes_read, 0) != bytes_read) {
                         warn("Problem sending to descriptor %d", client_fd);
                     }
@@ -400,16 +406,26 @@ void close_fd(gpointer client_fd, gpointer is_proper_shutdown)
 void respond(char *status_msg, int sock_fd)
 {
     // Build the status line
-    int status_line_len = 8 + 1 + strlen(status_msg);
-    char status_line[status_line_len + 1];
-    strcpy(status_line, "HTTP/1.1 ");
-    strcat(status_line, status_msg);
-    strcat(status_line, "\n");
+    int msg_len = 8 + 1 + strlen(status_msg) + 1
+                  + 13 + 1 + 10 + 1
+                  + 17 + 1
+                  + 15 + 1 + 1 + 1
+                  + 1
+                  + 6 + 1;
+    char msg[msg_len + 1];
+    memset(msg, 0, msg_len + 1);
+    strcpy(msg, "HTTP/1.1 ");
+    strcat(msg, status_msg);
+    strcat(msg, "\n");
+    strcat(msg, "Content-Type: text/plain\n");
+    strcat(msg, "Content-Length: 7\n");
+    strcat(msg, "Connection: close\n\n");
+    strcat(msg, "Error.\n");
+        // Rather dirty.
 
     // Send it
-    if (send(sock_fd, status_line, status_line_len + 1, 0) != status_line_len)
-            {
-        warn(
+    if (send(sock_fd, msg, msg_len + 1, 0) != msg_len + 1) {
+        warnx(
             "Could not send the whole status line to descriptor %d",
             sock_fd
         );
