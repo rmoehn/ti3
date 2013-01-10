@@ -24,7 +24,7 @@
 #define MAX_CLIENT_CNT 50
 #define MAX_REQUEST_LINE_LEN 500
 #define MAX_MIME_LEN 10
-#define BUFSIZE 4096
+#define BUFSIZE 1024
 
 void respond(char *, int);
 void register_in_set(gpointer, gpointer);
@@ -124,6 +124,7 @@ int main(int argc, char *argv[])
         if (pselect_ret == -1 && errno != EINTR) {
             err(ERR_SELECT, "Error during select");
         }
+        printf("DONE SELECT!\n");
 
         // Shut down gracefully on SIGINT
         if (got_SIGINT) {
@@ -241,7 +242,6 @@ int main(int argc, char *argv[])
                 char *uri  = strchr(request_line, '/') + 1;
                 *(uri - 2) = '\0';
                 if (strcmp(request_line, "GET") != 0) {
-                    puts("Unsupported GET");
                     respond(STATUS_501, client_fd);
                     continue;
                 }
@@ -324,8 +324,9 @@ int main(int argc, char *argv[])
                 );
 
                 // Send it
-                if (send(client_fd, header, header_len + 1, 0)
-                        != header_len + 1) {
+                int real_header_len = strlen(header);
+                if (send(client_fd, header, real_header_len, 0)
+                        != real_header_len) {
                     warn(
                         "Could not send the whole header to descriptor %d",
                         client_fd
