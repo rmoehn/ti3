@@ -124,7 +124,6 @@ int main(int argc, char *argv[])
         if (pselect_ret == -1 && errno != EINTR) {
             err(ERR_SELECT, "Error during select");
         }
-        printf("DONE SELECT!\n");
 
         // Shut down gracefully on SIGINT
         if (got_SIGINT) {
