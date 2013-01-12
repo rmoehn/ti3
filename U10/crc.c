@@ -21,7 +21,6 @@ void calculate(char *);
 void validate(char *);
 unsigned short calc_crc_rem(FILE *, long);
 int next_bit_from(FILE *);
-void print_short_as_bits(unsigned short);
 
 int main(int argc, char *argv[])
 {
@@ -185,8 +184,6 @@ unsigned short calc_crc_rem(FILE *file, long filesize)
         // Record the current highest bit in the register
         int highest_bit = div_reg & 0x8000;
 
-        //print_short_as_bits(div_reg);
-
         // Shift in the next bit from the file
         div_reg <<= 1;
         div_reg  |= next_bit_from(file);
@@ -219,12 +216,4 @@ int next_bit_from(FILE *file)
 
     // Return the bit at offset cur_offs in cur_byte
     return (cur_byte >> (7 - cur_offs)) & 1;
-}
-
-void print_short_as_bits(unsigned short n)
-{
-    for (int i = 0; i < 16; ++i) {
-        printf("%d", (n >> (17 - i) & 1));
-    }
-    putchar('\n');
 }
