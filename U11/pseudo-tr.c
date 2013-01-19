@@ -42,10 +42,13 @@ int main(int argc, char *argv[])
             err(ERR_RECV, "Error receiving from ICMP socket");
         }
 
+        struct iphdr *ip_header = (struct iphdr *) buffer;
+
+        int offs = ip_header->ihl * 4;
         printf("Typ: %d Code: %d Checksum: %d\n",
-            (int) buffer[0],
-            (int) buffer[1],
-            (int) ((buffer[2] << 8) | buffer[3])
+            (int) buffer[offs],
+            (int) buffer[offs + 1],
+            (int) ((buffer[offs + 2] << 8) | buffer[offs + 3])
         );
 
         puts(buffer);
