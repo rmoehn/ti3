@@ -1,3 +1,3 @@
-CFLAGS = -Wall -std=c99
+CFLAGS = -Wall -std=gnu99
 
 pseudo-tr: pseudo-tr.c

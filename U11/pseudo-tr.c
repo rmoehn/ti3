@@ -3,56 +3,124 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <arpa/inet.h>
 #include <err.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "errors.h"
+#include <string.h>
 
 #define BUFSIZE 1024
+#define S_PORT 20000
+#define D_PORT 80
+#define MAX_TTL 30
+#define DATA "What-ho!"
 
 int main(int argc, char *argv[])
 {
-    int in_sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (in_sock == -1) {
-        err(ERR_SOCKET, "Cannot open raw socket");
+    // Check arguments
+    if (argc != 2) {
+        err(ERR_ARG, "Usage: pseudo-tr <destination ip address>");
     }
+    char *final_address = argv[1];
 
-    struct sockaddr_in sock_addr;
-    socklen_t sock_addr_len;
-    //sock_addr.sin_family = AF_INET;
-    //sock_addr.sin_port   = IPPROTO_ICMP;
-    //sock_addr.sin_addr.s_addr   = INADDR_ANY;
-
-    char buffer[BUFSIZE];
-
-    while (1) {
-        int rcvf_ret = recvfrom(
-                           in_sock,
-                           buffer,
-                           BUFSIZE,
-                           0,
-                           (struct sockaddr *) &sock_addr,
-                           &sock_addr_len
-                       );
-
-        if (rcvf_ret == 0) {
-            exit(0);
+    // Receive ICMP packets in the child
+    pid_t pid;
+    if ((pid = fork()) == 0) {
+        // Open socket for receiving
+        int in_sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+        if (in_sock == -1) {
+            err(ERR_SOCKET, "Cannot open raw socket");
         }
 
-        if (rcvf_ret == -1) {
-            err(ERR_RECV, "Error receiving from ICMP socket");
+        // Receive all ICMP packets sent to this computer
+        struct sockaddr_in sock_addr;
+        socklen_t sock_addr_len;
+        char buffer[BUFSIZE];
+        while (1) {
+            // Receive data
+            int rcvf_ret = recvfrom(
+                               in_sock,
+                               buffer,
+                               BUFSIZE,
+                               0,
+                               (struct sockaddr *) &sock_addr,
+                               &sock_addr_len
+                           );
+            if (rcvf_ret == 0) {
+                exit(0);
+            }
+            if (rcvf_ret == -1) {
+                err(ERR_RECV, "Error receiving from ICMP socket");
+            }
+
+            // Extract the IP header and the ICMP packet's beginning
+            struct iphdr *ip_header = (struct iphdr *) buffer;
+            int icmp_offs           = ip_header->ihl * 4;
+
+            // Extract the source port of the UDP packet sent
+            int udp_offs = icmp_offs + 4;
+            unsigned short sport
+                = ntohs( (buffer[udp_offs] << 8) | buffer[udp_offs + 1] );
+
+            // If it is the port where we sent the UDP packet out
+            if (sport == S_PORT) {
+                // Print the ICMP packet's sender's IP address
+                struct in_addr ipa;
+                ipa.s_addr       = ip_header->saddr;
+                char *ip_address = inet_ntoa(ipa);
+                printf("%s\n", ip_address);
+
+                // Stop if we got through to the destination
+                if (strcmp(ip_address, final_address) == 0) {
+                    exit(0);
+                }
+            }
+        }
+    }
+    // Send UDP packets in the parent
+    else if (pid != -1) {
+        // Open socket for sending
+        int out_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (out_sock == -1) {
+            err(ERR_SOCKET, "Cannot open output socket");
         }
 
-        struct iphdr *ip_header = (struct iphdr *) buffer;
+        // Construct the address for sending
+        struct sockaddr_in sock_addr;
+        sock_addr.sin_family = AF_INET;
+        sock_addr.sin_port   = htons(S_PORT);
+        if (inet_aton(final_address, &(sock_addr.sin_addr)) == 0) {
+            errx(ERR_ARG, "Invalid IP address: %s", final_address);
+        }
 
-        int offs = ip_header->ihl * 4;
-        printf("Typ: %d Code: %d Checksum: %d\n",
-            (int) buffer[offs],
-            (int) buffer[offs + 1],
-            (int) ((buffer[offs + 2] << 8) | buffer[offs + 3])
-        );
+        // With increasing TTLs
+        for (int ttl = 1; ttl <= MAX_TTL; ++ttl) {
+            // Set this TTL on the socket
+            if (setsockopt(out_sock, IPPROTO_IP, IP_TTL, &ttl, sizeof(int))
+                    == -1) {
+                err(ERR_SOCKET, "Cannot set TTL");
+            }
 
-        puts(buffer);
-        fflush(stdout);
+            // Send some data to it
+            char *data     = DATA;
+            size_t datalen = strlen(data) + 1;
+            int sendto_ret = sendto(
+                                 out_sock,
+                                 data,
+                                 datalen,
+                                 0,
+                                 (struct sockaddr *) &sock_addr,
+                                 sizeof(struct sockaddr_in)
+                             );
+            if (sendto_ret != datalen) {
+                err(ERR_SEND, "Problem sending to socket");
+            }
+        }
+    }
+    // Abort on error
+    else {
+        err(ERR_FORK, "Cannot fork");
     }
 
     return 0;
