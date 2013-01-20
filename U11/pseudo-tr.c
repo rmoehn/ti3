@@ -3,24 +3,32 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/udp.h>
 #include <arpa/inet.h>
 #include <err.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include "errors.h"
 #include <string.h>
+#include <signal.h>
 
 #define BUFSIZE 1024
-#define S_PORT 20000
 #define D_PORT 80
 #define MAX_TTL 30
 #define DATA "What-ho!"
+
+volatile sig_atomic_t got_SIGCHLD = 0;
+void handle_SIGCHLD(int sig_num)
+{
+    got_SIGCHLD = 1;
+}
 
 int main(int argc, char *argv[])
 {
     // Check arguments
     if (argc != 2) {
-        err(ERR_ARG, "Usage: pseudo-tr <destination ip address>");
+        errx(ERR_ARG, "Usage: pseudo-tr <destination ip address>");
     }
     char *final_address = argv[1];
 
@@ -58,13 +66,16 @@ int main(int argc, char *argv[])
             struct iphdr *ip_header = (struct iphdr *) buffer;
             int icmp_offs           = ip_header->ihl * 4;
 
-            // Extract the source port of the UDP packet sent
+            // Extract the ICMP header and the UDP packet's beginning
+            struct icmphdr *icmp_header
+                = (struct icmphdr *) (buffer + icmp_offs);
             int udp_offs = icmp_offs + 4;
-            unsigned short sport
-                = ntohs( (buffer[udp_offs] << 8) | buffer[udp_offs + 1] );
+
+            // Extract the UDP header
+            struct udphdr *udp_header = (struct udphdr *) (buffer + udp_offs);
 
             // If it is the port where we sent the UDP packet out
-            if (sport == S_PORT) {
+            //if (udp_header->dest == D_PORT) {
                 // Print the ICMP packet's sender's IP address
                 struct in_addr ipa;
                 ipa.s_addr       = ip_header->saddr;
@@ -73,13 +84,25 @@ int main(int argc, char *argv[])
 
                 // Stop if we got through to the destination
                 if (strcmp(ip_address, final_address) == 0) {
+                    if (close(in_sock) == -1) {
+                        err(ERR_SOCKET, "Problem closing socket");
+                    }
                     exit(0);
                 }
-            }
+            //}
         }
     }
     // Send UDP packets in the parent
     else if (pid != -1) {
+        // Install a handler for SIGCHLD
+        struct sigaction SIGCHLD_action;
+        SIGCHLD_action.sa_handler = handle_SIGCHLD;
+        SIGCHLD_action.sa_flags   = 0;
+        sigfillset( &SIGCHLD_action.sa_mask );
+        if (sigaction(SIGCHLD, &SIGCHLD_action, NULL) == -1) {
+            err(ERR_SIGNAL, "Cannot install handler for SIGCHLD");
+        }
+
         // Open socket for sending
         int out_sock = socket(AF_INET, SOCK_DGRAM, 0);
         if (out_sock == -1) {
@@ -89,13 +112,22 @@ int main(int argc, char *argv[])
         // Construct the address for sending
         struct sockaddr_in sock_addr;
         sock_addr.sin_family = AF_INET;
-        sock_addr.sin_port   = htons(S_PORT);
+        sock_addr.sin_port   = htons(D_PORT);
         if (inet_aton(final_address, &(sock_addr.sin_addr)) == 0) {
             errx(ERR_ARG, "Invalid IP address: %s", final_address);
         }
 
         // With increasing TTLs
         for (int ttl = 1; ttl <= MAX_TTL; ++ttl) {
+            // Exit if child says that we already have reached the destination
+            if (got_SIGCHLD) {
+                if (close(out_sock) == -1) {
+                    err(ERR_SOCKET, "Problem closing socket");
+                }
+
+                exit(0);
+            }
+
             // Set this TTL on the socket
             if (setsockopt(out_sock, IPPROTO_IP, IP_TTL, &ttl, sizeof(int))
                     == -1) {
@@ -116,6 +148,9 @@ int main(int argc, char *argv[])
             if (sendto_ret != datalen) {
                 err(ERR_SEND, "Problem sending to socket");
             }
+
+            // Wait a sec
+            sleep(1);
         }
     }
     // Abort on error

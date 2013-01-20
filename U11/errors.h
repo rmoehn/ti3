@@ -3,3 +3,4 @@
 #define ERR_ARG 3
 #define ERR_FORK 4
 #define ERR_SEND 5
+#define ERR_SIGNAL 6
